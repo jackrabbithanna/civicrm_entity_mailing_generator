@@ -1,0 +1,7 @@
+name = CiviCRM Entity Mailing Generator
+description = Provides a VBO action to generate individual scheduled mailings from a custom list of CiviCRM Contacts
+core = 7.x
+dependencies[] = views_bulk_operations
+dependencies[] = civicrm_entity
+dependencies[] = date_popup
+

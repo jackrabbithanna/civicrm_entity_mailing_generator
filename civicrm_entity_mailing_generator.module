@@ -1,0 +1,282 @@
+<?php
+
+/**
+ * CiviCRM Entity Mailing Generator Info
+ *
+ * Sets up info and alter hooks to gather mailing generator handlers
+ *
+ * @param null $id
+ * @return array
+ */
+function civicrm_entity_mailing_generator_get_generator_handler_info($generator_id = NULL) {
+  $results['civicrm_entity_mailing_generator_default_generator'] = [
+      'label' => 'Default Mailer',
+      'generator callback' => 'civicrm_entity_mailing_generator_generator_callback',
+  ];
+  foreach (module_implements('civicrm_entity_mailing_generator_info') as $module) {
+    // Calling all modules implementing hook_hook_name and
+    // Returning results than pushing them into the $result array:
+    $result = module_invoke($module, 'civicrm_entity_mailing_generator_info');
+    foreach ($result as $id => $r) {
+      if (!empty($r['generator callback']) && !empty($r['label'])) {
+        $results[$id] = $r;
+      }
+    }
+  }
+  drupal_alter('civicrm_entity_mailing_generator_info', $results);
+  if ($generator_id && !empty($result[$generator_id])) {
+    return $results[$generator_id];
+  }
+  else {
+    return $results;
+  }
+}
+
+/**
+ * Default mailing generator callback
+ *
+ * We do nothing for now, as we just let the contact entity fetched by VBO for the Views row get the email
+ *
+ * The actual mailing generator VBO action callback will use the CiviCRM Contact entity id from the Views row, and find the primary email of that contact
+ *
+ * @param $entity
+ * @param $context
+ *
+ * @return array
+ */
+function civicrm_entity_mailing_generator_generator_callback($entity, $context) {
+  return [];
+}
+
+/**
+ * Implements hook_action_info().
+ *
+ * @return array
+ */
+function civicrm_entity_mailing_generator_action_info() {
+  return [
+    'civicrm_entity_mailing_generator_generate_civicrm_mailing_for_contact_action' => [
+      'type' => 'civicrm_contact',
+      'label' => t('Generate Scheduled Mailing'),
+      'configurable' => TRUE,
+      'vbo_configurable' => TRUE,
+      'behavior' => ['views_property'],
+      'triggers' => ['any'],
+    ],
+  ];
+}
+
+/**
+ * Generate Scheduled Mailing VBO field action config form callback
+ *
+ * @param $options
+ * @param $entity_type
+ * @param $settings_dom_id
+ *
+ * @return array
+ */
+function civicrm_entity_mailing_generator_generate_civicrm_mailing_for_contact_action_views_bulk_operations_form($options, $entity_type, $settings_dom_id) {
+  $generator_info = civicrm_entity_mailing_generator_get_generator_handler_info();
+  $generator_options = [];
+  foreach ($generator_info as $id => $info) {
+    $generator_options[$id] = $info['label'];
+  }
+  $form['generator'] = [
+    '#type' => 'select',
+    '#title' => 'Generator type',
+    '#description' => 'Choose the generator to use for scheduling the mailings',
+    '#options' => $generator_options,
+    '#default_value' => !empty($options['generator']) ? $options['generator'] : '',
+    '#required' => TRUE,
+  ];
+  return $form;
+}
+
+/**
+ * Generate Scheduled Mailing bulk operation form callback
+ *
+ * @param $context
+ *
+ * @return mixed
+ */
+function civicrm_entity_mailing_generator_generate_civicrm_mailing_for_contact_action_form($context, &$form_state) {
+  $mailing_template_options = [
+      '' => '- Select -',
+    ] + civicrm_entity_mailing_generator_get_message_templates();
+
+  $form['mailing_template_id'] = [
+    '#type' => 'select',
+    '#title' => 'Mailing Template',
+    '#options' => $mailing_template_options,
+    '#default_value' => '',
+    '#required' => TRUE,
+  ];
+  $form['from_name'] = [
+    '#type' => 'textfield',
+    '#title' => 'From name',
+    '#description' => 'Enter an name that these mailings will be from',
+    '#required' => TRUE,
+    '#default_value' => variable_get('site_name', ''),
+  ];
+  $form['from_address'] = [
+    '#type' => 'textfield',
+    '#title' => 'From email address',
+    '#description' => 'Enter an email address that these mailings will be from',
+    '#required' => TRUE,
+    '#default_value' => variable_get('site_mail', ''),
+  ];
+  $form['mailing_scheduled_date'] = [
+    '#type' => 'date_popup',
+    '#title' => 'Mailings Scheduled Date',
+    '#description' => 'Choose a date for the mailings to be processed and sent',
+    '#date_format' => 'Y-m-d H:i:s',
+  ];
+  return $form;
+}
+
+/**
+ * Validation handler for generate civicrm mailing for contact VBO action
+ *
+ * @param $form
+ * @param $form_state
+ */
+function civicrm_entity_mailing_generator_generate_civicrm_mailing_for_contact_action_validate($form, &$form_state) {
+  if (!valid_email_address($form_state['values']['from_address'])) {
+    form_set_error('from_address', 'Invalid email address format');
+  }
+}
+
+/**
+ * Generate Scheduled Mailing bulk operation form submit handler
+ *
+ * @param $form
+ * @param $form_state
+ *
+ * @return array
+ */
+function civicrm_entity_mailing_generator_generate_civicrm_mailing_for_contact_action_submit($form, &$form_state) {
+  return ['views_object' => $form_state['build_info']['args'][0], 'form_values' => $form_state['values']];
+}
+
+/**
+ * Generate Scheduled Mailing VBO callback
+ *
+ * @param $entity
+ * @param array $context
+ */
+function civicrm_entity_mailing_generator_generate_civicrm_mailing_for_contact_action($entity, $context = array()) {
+  if (!empty($context['settings']['generator'])) {
+    $generator_info = civicrm_entity_mailing_generator_get_generator_handler_info($context['settings']['generator']);
+    if (!empty($generator_info)) {
+      $callback = $generator_info['generator callback'];
+      $mailing_job_params = call_user_func($callback, $entity, $context);
+      if (!empty($context['form_values']['mailing_template_id'])) {
+        civicrm_initialize();
+        if (empty($mailing_job_params['recipient']['contact_id'])) {
+          $recipient_contact_id = $entity->id;
+          $result = civicrm_api3('Email', 'get', [
+            'sequential' => 1,
+            'contact_id' => $recipient_contact_id,
+            'is_primary' => 1,
+          ]);
+          if (!empty($result['values'][0]['id'])) {
+            $recipient_email_id = $result['values'][0]['id'];
+          }
+        }
+        else {
+          $recipient_contact_id = $mailing_job_params['recipient']['contact_id'];
+          if (!empty($mailing_job_params['recipient']['email_id'])) {
+            $recipient_email_id = $mailing_job_params['recipient']['email_id'];
+          }
+          else {
+            $result = civicrm_api3('Email', 'get', [
+              'sequential' => 1,
+              'contact_id' => $recipient_contact_id,
+              'is_primary' => 1,
+            ]);
+            if (!empty($result['values'][0]['id'])) {
+              $recipient_email_id = $result['values'][0]['id'];
+            }
+          }
+        }
+
+        if (!empty($recipient_email_id) && !empty($recipient_contact_id)) {
+
+          $schedule_email_date = !empty($context['form_values']['mailing_scheduled_date']) ? strtotime($context['form_values']['mailing_scheduled_date']) : strtotime('now');
+          $schedule_email_date = date('YmdHis', $schedule_email_date);
+
+          $template_param = ['id' => $context['form_values']['mailing_template_id']];
+          $template_defaults = [];
+          CRM_Core_BAO_MessageTemplate::retrieve($template_param, $template_defaults);
+          $params = array();
+          $params['from_name'] = !empty($context['form_values']['from_name']) ? $context['form_values']['from_name'] : variable_get('site_name');
+          $params['from_email'] = !empty($context['form_values']['from_address']) ? $context['form_values']['from_address'] : variable_get('site_mail');
+          $params['replyto_email'] = !empty($context['form_values']['from_address']) ? $context['form_values']['from_address'] : variable_get('site_mail');
+
+          $params['name'] = "{$mailing_job_params['recipient']['contact_id']} - {$generator_info['label']} - [" . date('Y-m-d') . "]";
+          $params['msg_template_id'] = $context['form_values']['mailing_template_id'];
+          $params['subject'] = $template_defaults['msg_subject'];
+          $params['body_text'] = $template_defaults['msg_text'];
+          $params['body_html'] = $template_defaults['msg_html'];
+
+          $session = CRM_Core_Session::singleton();
+          $params['created_id'] = $session->get('userID');
+          $params['created_date'] = date('YmdHis');
+
+
+          $mailing = CRM_Mailing_BAO_Mailing::create($params);
+          CRM_Core_DAO::executeQuery("INSERT INTO civicrm_mailing_recipients (mailing_id, contact_id, email_id) VALUES ({$mailing->id}, {$recipient_contact_id}, {$recipient_email_id})");
+
+          // Setting up job
+          $job = new CRM_Mailing_BAO_MailingJob();
+          $job->mailing_id = $mailing->id;
+          $job->is_test = FALSE;
+          $job->scheduled_date = $schedule_email_date;
+          $job->status = 'Scheduled';
+          $job->save();
+
+          // Updating mailing
+          $mailing->scheduled_id = $session->get('userID');
+          $mailing->scheduled_date = $schedule_email_date;
+          $mailing->approver_id = $session->get('userID');
+          $mailing->approval_date = $schedule_email_date;
+          $mailing->approval_status_id = 1;
+          $mailing->save();
+
+          db_insert('civicrm_entity_mailing_generator_mailing_jobs')
+            ->fields([
+              'related_contact_id' => $entity->id,
+              'recipient_id'       => $mailing_job_params['recipient']['contact_id'],
+              'mailing_id'         => $mailing->id,
+              'mailing_job_id'     => $job->id,
+              'scheduled_date'     => strtotime($schedule_email_date),
+            ])
+            ->execute();
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Utility function to build an array of message templates
+ */
+function civicrm_entity_mailing_generator_get_message_templates() {
+  civicrm_initialize();
+  $message_templates = [];
+  try {
+    $result = civicrm_api3('MessageTemplate', 'get', array(
+      'is_active' => 1,
+      'options' => array('limit' => 0, 'sort' => "id DESC"),
+    ));
+    if (!empty($result['values'])) {
+      foreach ($result['values'] as $id => $value) {
+        $message_templates[$id] = $value['msg_title'];
+      }
+    }
+  }
+  catch (Exception $e) {
+    watchdog('civicrm_entity_mailing_generator', $e->getMessage());
+  }
+  return $message_templates;
+}

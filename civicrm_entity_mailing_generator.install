@@ -1,0 +1,61 @@
+<?php
+
+/**
+ * Implements hook_schema().
+ */
+function civicrm_entity_mailing_generator_schema() {
+  $schema['civicrm_entity_mailing_generator_mailing_jobs'] = [
+    'description' => 'CiviCRM Entity Mailing Generator mailing job queue',
+    'fields'      => [
+      'id'             => [
+        'type'        => 'serial',
+        'unsigned'    => TRUE,
+        'not null'    => TRUE,
+        'description' => 'Primary Key: id.',
+      ],
+      'related_contact_id'    => [
+        'type'        => 'int',
+        'unsigned'    => TRUE,
+        'not null'    => TRUE,
+        'default'     => 0,
+        'description' => 'Related contact id to pull additional token values from',
+      ],
+      'recipient_id'   => [
+        'type'        => 'int',
+        'unsigned'    => TRUE,
+        'not null'    => TRUE,
+        'default'     => 0,
+        'description' => 'Contact ID of the mailing recipient',
+      ],
+      'mailing_id'     => [
+        'type'        => 'int',
+        'unsigned'    => TRUE,
+        'not null'    => TRUE,
+        'default'     => 0,
+        'description' => 'civi mailing table id.',
+      ],
+      'mailing_job_id' => [
+        'type'        => 'int',
+        'unsigned'    => TRUE,
+        'not null'    => TRUE,
+        'default'     => 0,
+        'description' => 'civi mailing job table id.',
+      ],
+      'scheduled_date' => [
+        'type'        => 'int',
+        'unsigned'    => TRUE,
+        'not null'    => TRUE,
+        'description' => 'date the mailing is scheduled to be sent',
+      ],
+    ],
+    'primary key' => ['id'],
+    'indexes'     => [
+      'related_contact_id'    => ['related_contact_id'],
+      'recipient_id'   => ['recipient_id'],
+      'mailing_id'     => ['mailing_id'],
+      'mailing_job_id' => ['mailing_job_id'],
+      'mailing_job'    => ['mailing_id', 'mailing_job_id'],
+    ],
+  ];
+  return $schema;
+}
