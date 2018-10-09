@@ -5,7 +5,7 @@
  *
  * Sets up info and alter hooks to gather mailing generator handlers
  *
- * @param null $id
+ * @param $generator_id
  * @return array
  */
 function civicrm_entity_mailing_generator_get_generator_handler_info($generator_id = NULL) {
